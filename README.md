@@ -7,6 +7,7 @@
 [![Ktor](https://img.shields.io/badge/Ktor-3.5.2-blue?logo=ktor)](https://ktor.io)
 [![Android](https://img.shields.io/badge/Android-minSdk%2026-green?logo=android)]()
 [![Tests](https://img.shields.io/badge/tests-137-brightgreen)](#testing)
+[![CI](https://github.com/Antunez-Thomas/academy-client/actions/workflows/ci.yml/badge.svg)](https://github.com/Antunez-Thomas/academy-client/actions/workflows/ci.yml)
 
 > **Client-only repository.** The WordPress plugin that exposes the curated REST API lives in a separate, private repository. Everything here is the mobile app: shared UI, networking, session, and platform integrations.
 
