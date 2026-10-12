@@ -75,6 +75,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design: layering, session li
 - **Design system** — color/spacing/dimension tokens, Montserrat typography scale, light & dark themes, adaptive shell (bottom bar → navigation rail at 600/840 dp), reading-width cap.
 - **Localization** — all app copy in Latin American Spanish through shared Compose resources; server-authored content is never translated.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/login.png" width="200" alt="Sign-in screen" />
+  <img src="docs/images/dashboard.png" width="200" alt="My Learning dashboard with live classes, events and support actions" />
+  <img src="docs/images/curriculum.png" width="200" alt="Course curriculum" />
+  <img src="docs/images/lesson.png" width="200" alt="Lesson detail with resources" />
+</p>
+
+Full flows (recorded against a local demo backend with fake data):
+
+| Sign in | Open a course | Complete a lesson |
+| --- | --- | --- |
+| <img src="docs/images/login-flow.gif" width="230" alt="Sign-in flow" /> | <img src="docs/images/curriculum-flow.gif" width="230" alt="Course navigation" /> | <img src="docs/images/complete-flow.gif" width="230" alt="Mark lesson complete" /> |
+
 ## API surface
 
 The client defines one interface, `AcademyApi`, implemented by `KtorAcademyApi`. Base path `/wp-json/academy-mobile/v1/`:
