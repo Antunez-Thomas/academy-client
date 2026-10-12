@@ -1,5 +1,8 @@
 package com.example.academyapp
 
+import com.example.academyapp.generated.resources.error_forbidden
+import com.example.academyapp.generated.resources.error_server_unavailable
+import com.example.academyapp.generated.resources.error_invalid_response
 import com.example.academyapp.generated.resources.Res
 import com.example.academyapp.generated.resources.error_close_quiz_session
 import com.example.academyapp.generated.resources.error_mark_lesson_complete
@@ -32,6 +35,9 @@ internal val testUserFacingStrings = UserFacingStringResolver { resource: String
         Res.string.error_video_authorization -> "No pudimos autorizar este video. Inténtalo de nuevo."
         Res.string.error_no_connection ->
             "No se pudo conectar con Academy. Revisa tu conexión e inténtalo de nuevo."
+        Res.string.error_server_unavailable -> "Academy no está disponible temporalmente. Inténtalo de nuevo."
+        Res.string.error_invalid_response -> "Academy envió una respuesta inesperada. Inténtalo de nuevo."
+        Res.string.error_forbidden -> "Tu cuenta no tiene acceso a este contenido."
         Res.string.error_unauthorized -> "El correo electrónico o la contraseña son incorrectos."
         Res.string.auth_action_failed -> "No pudimos completar la solicitud. Revisa tus datos e inténtalo de nuevo."
         Res.string.auth_accept_legal_agreement -> "Debes aceptar los términos y la política de privacidad para crear una cuenta."

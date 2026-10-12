@@ -47,6 +47,8 @@ class IosQuizWebSessionController : QuizWebSessionController {
     private var activeLogoutUrl: String? = null
     private var logoutDelegate: QuizLogoutNavigationDelegate? = null
 
+    override fun hasPendingCleanup(): Boolean = activeLogoutUrl != null
+
     override fun activate(logoutUrl: String) {
         val parsed = runCatching { Url(logoutUrl) }.getOrNull() ?: return
         if (parsed.protocol.name == "https" ||

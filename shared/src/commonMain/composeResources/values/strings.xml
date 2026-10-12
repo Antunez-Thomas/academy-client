@@ -102,6 +102,7 @@
     <string name="curriculum_load_error_title">No pudimos cargar el contenido del curso</string>
     <string name="lesson_loading">Cargando la lección…</string>
     <string name="lesson_load_error_title">No pudimos cargar esta lección</string>
+    <string name="quiz_cleanup_in_progress">Cerrando la sesión de la evaluación…</string>
     <string name="quiz_loading">Cargando la evaluación…</string>
     <string name="quiz_load_error_title">No pudimos abrir esta evaluación</string>
     <string name="quiz_close_error_title">No pudimos cerrar esta evaluación</string>

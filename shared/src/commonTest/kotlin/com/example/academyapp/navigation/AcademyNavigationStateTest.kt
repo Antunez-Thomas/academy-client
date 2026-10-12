@@ -44,7 +44,7 @@ class AcademyNavigationStateTest {
     }
 
     @Test
-    fun retainedQuizChildRestoresInsideClosableMyLearningShell() {
+    fun liveQuizAfterConfigurationChangeStaysInsideClosableMyLearningShell() {
         val restored = AcademyShellState.restore(
             savedRoot = AcademyDestination.Profile.name,
             hasLearningChild = true,
@@ -53,6 +53,26 @@ class AcademyNavigationStateTest {
 
         assertEquals(AcademyDestination.MyLearning, restored.navigation.selectedDestination)
         assertFalse(restored.showPrimaryNavigation)
+        assertTrue(restored.canCloseLearningChild)
+    }
+
+    @Test
+    fun processDeathDiscardsQuizAndRestoresVisibleClosableCurriculumShell() {
+        val routes = listOf(
+            com.example.academyapp.course.navigation.LearningRoute.Dashboard,
+            com.example.academyapp.course.navigation.LearningRoute.Curriculum(42),
+            com.example.academyapp.course.navigation.LearningRoute.QuizWeb(42, 9),
+        )
+        val restoredRoutes = com.example.academyapp.course.navigation.restoreLearningNavigation(
+            1, com.example.academyapp.course.navigation.saveLearningNavigation(1, routes),
+        )!!.routes
+        val restored = AcademyShellState.restore(
+            savedRoot = AcademyDestination.MyLearning.name,
+            hasLearningChild = restoredRoutes.last() != com.example.academyapp.course.navigation.LearningRoute.Dashboard,
+            retainedQuizChildActive = restoredRoutes.last() is com.example.academyapp.course.navigation.LearningRoute.QuizWeb,
+        )
+        assertEquals(AcademyDestination.MyLearning, restored.navigation.selectedDestination)
+        assertTrue(restored.showPrimaryNavigation)
         assertTrue(restored.canCloseLearningChild)
     }
 

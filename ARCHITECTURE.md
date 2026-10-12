@@ -35,7 +35,7 @@ Rules:
 | Account | `features.account` | Profile editing, avatar, deletion request |
 | Auth | `features.auth` | Sign-in / register / password-reset presentation |
 | Design | `design` | Tokens, typography, theme, adaptive scaffold, shared state views |
-| Navigation | `navigation` | Root destinations, shell state, window-class breakpoints |
+| Navigation | `navigation` | Root destinations, shell state, window-class breakpoints; Learning child stack on Navigation 3 (`course.navigation`) |
 
 ## Session lifecycle
 
@@ -93,9 +93,9 @@ Both WebViews validate every main-frame navigation against the authorized URL an
 
 | Source set | Focus |
 | --- | --- |
-| `commonTest` (120) | API contract via `MockEngine`, session concurrency, view-model behavior, navigation state, URL policies, design tokens |
+| `commonTest` (150) | API contract via `MockEngine`, session concurrency, view-model behavior, Navigation 3 route serialization and restoration, URL policies, design tokens |
 | `androidHostTest` (5) | Environment selection, opt-in live integration flow |
-| `androidDeviceTest` (5) | Keystore round-trip, WebView profile isolation |
+| `androidDeviceTest` (6) | Keystore round-trip, WebView profile isolation |
 | `iosTest` (3) | Keychain round-trip, environment selection (macOS) |
 | `androidApp` instrumentation (4) | Fullscreen video host behavior |
 
@@ -103,6 +103,6 @@ The live integration test is opt-in (`ACADEMY_LIVE_TEST=1`) and reads credential
 
 ## Deliberate exclusions
 
-- **No navigation library.** Root tabs plus a sealed `CourseDestination` hierarchy in a view model; adopting Navigation 3 is evaluated as a follow-up.
+- **No navigation library for the root shell.** Home, My Learning, and Profile tabs stay hand-rolled. The Learning child stack (Dashboard → Courses → Curriculum → Lesson → Quiz) runs on **Navigation 3**: serializable `NavKey` routes with only stable IDs, explicit polymorphic serializers (identical on Android and iOS), validated history restoration, and quiz routes discarded on process death so an interrupted WebView session can never resume unattended.
 - **No offline downloads.** Deferred until media-delivery and platform protection requirements are settled.
 - **No server code.** Entitlement rules, profile storage, and media authorization belong to the API plugin, not to this client.

@@ -5,6 +5,8 @@ import androidx.compose.ui.Modifier
 import com.example.academyapp.api.model.QuizWebLaunch
 
 interface QuizWebSessionController {
+    /** Safe metadata only; callers never receive logout URLs or cookie/session data. */
+    fun hasPendingCleanup(): Boolean = false
     fun activate(logoutUrl: String)
     suspend fun revokeAndClear(): QuizWebSessionCleanupResult
 }

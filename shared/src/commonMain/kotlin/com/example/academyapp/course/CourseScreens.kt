@@ -30,6 +30,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.TextButton
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.ui.NavDisplay
+import com.example.academyapp.course.navigation.LearningRoute
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,9 +74,24 @@ import com.example.academyapp.design.components.AcademyCourseCard
 import com.example.academyapp.design.components.AcademyLessonRow
 import com.example.academyapp.design.components.AcademyLessonSectionHeader
 import com.example.academyapp.design.components.AcademyTopicRow
-import com.example.academyapp.design.components.AcademyScreenTransition
 import com.example.academyapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
+
+internal enum class LearningRecoveryPresentation { Loading, CleanupError, RestorationError, Parent }
+
+/** Shared by the renderer and deterministic suspended-cleanup presentation tests. */
+internal fun learningRecoveryPresentation(
+    restoring: Boolean,
+    cleanupPending: Boolean,
+    error: String?,
+    dismissed: Boolean,
+): LearningRecoveryPresentation = when {
+    dismissed -> LearningRecoveryPresentation.Parent
+    restoring -> LearningRecoveryPresentation.Loading
+    cleanupPending -> LearningRecoveryPresentation.CleanupError
+    error != null -> LearningRecoveryPresentation.RestorationError
+    else -> LearningRecoveryPresentation.Parent
+}
 
 @Composable
 fun CourseRoute(
@@ -80,7 +99,10 @@ fun CourseRoute(
     quizWebSessionController: QuizWebSessionController,
 ) {
     val listState by viewModel.listState.collectAsStateWithLifecycle()
-    val destination by viewModel.destination.collectAsStateWithLifecycle()
+    val recoveryDismissed by viewModel.recoveryDismissed.collectAsStateWithLifecycle()
+    val restoring by viewModel.isRestoringNavigation.collectAsStateWithLifecycle()
+    val restorationError by viewModel.restorationError.collectAsStateWithLifecycle()
+    val interruptedCleanup by viewModel.interruptedQuizCleanupPending.collectAsStateWithLifecycle()
     val curriculumState by viewModel.curriculumState.collectAsStateWithLifecycle()
     val lessonState by viewModel.lessonState.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
@@ -90,65 +112,137 @@ fun CourseRoute(
     val eventsState by viewModel.eventsState.collectAsStateWithLifecycle()
     val supportActionsState by viewModel.supportActionsState.collectAsStateWithLifecycle()
 
-    AcademyScreenTransition(
-        targetState = destination,
-        stateOrder = { route ->
-            when (route) {
-                CourseDestination.Dashboard -> 0
-                CourseDestination.Courses -> 1
-                is CourseDestination.Curriculum -> 2
-                is CourseDestination.LessonDetail -> 3
-                is CourseDestination.QuizWeb -> 4
+    val recovery = learningRecoveryPresentation(restoring, interruptedCleanup, restorationError, recoveryDismissed)
+    val recoveryBackLabel = if (LearningRoute.Courses in viewModel.backStack)
+        Res.string.back_to_courses else Res.string.back_to_dashboard
+    if (recovery == LearningRecoveryPresentation.Loading) {
+        AcademyStateContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(AcademySpacing.Medium)) {
+                AcademyLoadingState(stringResource(Res.string.curriculum_loading))
+                OutlinedButton(onClick = viewModel::navigateBack) { Text(stringResource(recoveryBackLabel)) }
             }
-        },
-        modifier = Modifier.fillMaxSize(),
-    ) { route ->
-        when (route) {
-            CourseDestination.Dashboard -> CourseDashboardScreen(
-                state = listState,
-                supportSiteHost = viewModel.supportSiteHost,
-                liveClassesState = liveClassesState,
-                eventsState = eventsState,
-                supportActionsState = supportActionsState,
-                onRetry = viewModel::retryCourses,
-                onRetryLiveClasses = viewModel::retryLiveClasses,
-                onRetryEvents = viewModel::retryEvents,
-                onRetrySupportActions = viewModel::retrySupportActions,
-                onCourseSelected = viewModel::openCourse,
-                onViewAllCourses = viewModel::showAllCourses,
-            )
-            CourseDestination.Courses -> CourseListScreen(
-                state = listState,
-                onBack = viewModel::showDashboard,
-                onRetry = viewModel::retryCourses,
-                onCourseSelected = viewModel::openCourse,
-            )
-            is CourseDestination.Curriculum -> CurriculumScreen(
-                state = curriculumState,
-                onBack = viewModel::showCourses,
-                onRetry = viewModel::retryCurriculum,
-                onLessonSelected = viewModel::openLesson,
-                onQuizSelected = viewModel::openQuiz,
-            )
-            is CourseDestination.LessonDetail -> LessonScreen(
-                state = lessonState,
-                playbackState = playbackState,
-                completionState = completionState,
-                onBack = viewModel::showCurriculum,
-                onRetry = viewModel::retryLesson,
-                onRetryPlayback = viewModel::retryPlayback,
-                onMarkComplete = viewModel::markLessonComplete,
-                onRetryCompletion = viewModel::retryLessonCompletion,
-            )
-            is CourseDestination.QuizWeb -> QuizWebScreen(
-                destination = route,
-                state = quizWebState,
-                sessionController = quizWebSessionController,
-                onBack = viewModel::returnFromQuiz,
-                onRetry = viewModel::retryQuizLaunch,
-                onRetryCleanup = viewModel::retryQuizCleanup,
-            )
         }
+        return
+    }
+    if (recovery == LearningRecoveryPresentation.CleanupError) {
+        AcademyStateContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(AcademySpacing.Medium)) {
+                AcademyErrorState(
+                    title = stringResource(Res.string.quiz_close_error_title),
+                    message = (quizWebState as? QuizWebUiState.CleanupError)?.message
+                        ?: stringResource(Res.string.error_close_quiz_session),
+                    onAction = viewModel::retryInterruptedQuizCleanup,
+                )
+                OutlinedButton(onClick = viewModel::navigateBack) { Text(stringResource(recoveryBackLabel)) }
+            }
+        }
+        return
+    }
+    if (recovery == LearningRecoveryPresentation.RestorationError) restorationError?.let { message ->
+        AcademyStateContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(AcademySpacing.Medium)) {
+                AcademyErrorState(
+                    title = stringResource(Res.string.curriculum_load_error_title),
+                    message = message,
+                    onAction = viewModel::retryNavigationRestoration,
+                )
+                OutlinedButton(onClick = viewModel::navigateBack) {
+                    Text(stringResource(recoveryBackLabel))
+                }
+            }
+        }
+        return
+    }
+    Column(Modifier.fillMaxSize()) {
+        if (recoveryDismissed && interruptedCleanup) {
+            Row(
+                Modifier.fillMaxWidth().padding(AcademySpacing.Small),
+                horizontalArrangement = Arrangement.spacedBy(AcademySpacing.Small),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val failure = quizWebState as? QuizWebUiState.CleanupError
+                Text(
+                    failure?.message ?: stringResource(Res.string.quiz_cleanup_in_progress),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (failure != null) {
+                    TextButton(onClick = viewModel::retryInterruptedQuizCleanup) { Text(stringResource(Res.string.try_again)) }
+                } else {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+            }
+        }
+        NavDisplay(
+            backStack = viewModel.backStack,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            onBack = viewModel::navigateBack,
+            entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
+            entryProvider = entryProvider {
+                entry<LearningRoute.Dashboard> {
+                    CourseDashboardScreen(
+                        state = listState,
+                        supportSiteHost = viewModel.supportSiteHost,
+                        liveClassesState = liveClassesState,
+                        eventsState = eventsState,
+                        supportActionsState = supportActionsState,
+                        onRetry = viewModel::retryCourses,
+                        onRetryLiveClasses = viewModel::retryLiveClasses,
+                        onRetryEvents = viewModel::retryEvents,
+                        onRetrySupportActions = viewModel::retrySupportActions,
+                        onCourseSelected = viewModel::openCourse,
+                        onViewAllCourses = viewModel::showAllCourses,
+                    )
+                }
+                entry<LearningRoute.Courses> {
+                    CourseListScreen(
+                        state = listState,
+                        onBack = viewModel::showDashboard,
+                        onRetry = viewModel::retryCourses,
+                        onCourseSelected = viewModel::openCourse,
+                    )
+                }
+                entry<LearningRoute.Curriculum> {
+                    CurriculumScreen(
+                        state = curriculumState,
+                        onBack = viewModel::showCourses,
+                        onRetry = viewModel::retryCurriculum,
+                        onLessonSelected = viewModel::openLesson,
+                        onQuizSelected = viewModel::openQuiz,
+                    )
+                }
+                entry<LearningRoute.LessonDetail> {
+                    LessonScreen(
+                        state = lessonState,
+                        playbackState = playbackState,
+                        completionState = completionState,
+                        onBack = viewModel::showCurriculum,
+                        onRetry = viewModel::retryLesson,
+                        onRetryPlayback = viewModel::retryPlayback,
+                        onMarkComplete = viewModel::markLessonComplete,
+                        onRetryCompletion = viewModel::retryLessonCompletion,
+                    )
+                }
+                entry<LearningRoute.QuizWeb> { route ->
+                    QuizWebScreen(
+                        courseTitle = when (val state = curriculumState) {
+                            is CurriculumUiState.Content -> state.course.title
+                            is CurriculumUiState.Empty -> state.course.title
+                            is CurriculumUiState.Loading -> state.course.title
+                            is CurriculumUiState.Error -> state.course.title
+                            CurriculumUiState.Hidden -> ""
+                        },
+                        quizTitle = (curriculumState as? CurriculumUiState.Content)?.quizzes
+                            ?.firstOrNull { it.id == route.quizId }?.title.orEmpty(),
+                        state = quizWebState,
+                        sessionController = quizWebSessionController,
+                        onBack = viewModel::returnFromQuiz,
+                        onRetry = viewModel::retryQuizLaunch,
+                        onRetryCleanup = viewModel::retryQuizCleanup,
+                    )
+                }
+            },
+        )
     }
 }
 
@@ -707,7 +801,8 @@ private fun QuizRow(
 
 @Composable
 private fun QuizWebScreen(
-    destination: CourseDestination.QuizWeb,
+    courseTitle: String,
+    quizTitle: String,
     state: QuizWebUiState,
     sessionController: QuizWebSessionController,
     onBack: () -> Unit,
@@ -722,12 +817,12 @@ private fun QuizWebScreen(
             ) {
                 OutlinedButton(onClick = onBack) { Text(stringResource(Res.string.back_to_curriculum)) }
                 Text(
-                    destination.course.title,
+                    courseTitle,
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    destination.quiz.title,
+                    quizTitle,
                     style = if (twoPane) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
                 )
                 if (!twoPane) HorizontalDivider()

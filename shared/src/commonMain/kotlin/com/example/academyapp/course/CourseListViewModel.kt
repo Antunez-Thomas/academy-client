@@ -1,5 +1,9 @@
 package com.example.academyapp.course
 
+import androidx.navigation3.runtime.NavBackStack
+import com.example.academyapp.course.navigation.LearningRoute
+import com.example.academyapp.course.navigation.saveLearningNavigation
+import com.example.academyapp.course.navigation.restoreLearningNavigation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.academyapp.api.ApiResult
@@ -49,20 +53,6 @@ sealed interface DashboardSectionUiState<out T> {
     data object Unavailable : DashboardSectionUiState<Nothing>
     data class Content<T>(val items: List<T>) : DashboardSectionUiState<T>
     data class Error(val message: String) : DashboardSectionUiState<Nothing>
-}
-
-sealed interface CourseDestination {
-    data object Dashboard : CourseDestination
-    data object Courses : CourseDestination
-    data class Curriculum(val course: Course) : CourseDestination
-    data class LessonDetail(
-        val course: Course,
-        val selectedLesson: Lesson,
-    ) : CourseDestination
-    data class QuizWeb(
-        val course: Course,
-        val quiz: Quiz,
-    ) : CourseDestination
 }
 
 sealed interface CurriculumUiState {
@@ -156,8 +146,20 @@ class CourseListViewModel internal constructor(
     private val mutableLiveClassesState = MutableStateFlow<DashboardSectionUiState<DashboardLiveClass>>(DashboardSectionUiState.Loading)
     private val mutableEventsState = MutableStateFlow<DashboardSectionUiState<DashboardEvent>>(DashboardSectionUiState.Loading)
     private val mutableSupportActionsState = MutableStateFlow<DashboardSectionUiState<DashboardSupportAction>>(DashboardSectionUiState.Loading)
-    private val mutableDestination = MutableStateFlow<CourseDestination>(CourseDestination.Dashboard)
-    private var coursePickerParent: CourseDestination = CourseDestination.Dashboard
+    // The Nav3 stack is the only authoritative child-route history.
+    val backStack = NavBackStack<LearningRoute>(LearningRoute.Dashboard)
+    private var navigationTouched = false
+    private var restorationJob: Job? = null
+    private var pendingRestoredNavigation: List<LearningRoute>? = null
+    private val mutableRestoring = MutableStateFlow(false)
+    // Back dismisses the presentation gate, independently of mandatory quiz cleanup.
+    private val mutableRecoveryDismissed = MutableStateFlow(false)
+    val recoveryDismissed: StateFlow<Boolean> = mutableRecoveryDismissed.asStateFlow()
+    private val mutableRestorationError = MutableStateFlow<String?>(null)
+    val restorationError: StateFlow<String?> = mutableRestorationError.asStateFlow()
+    private val mutableInterruptedQuizCleanup = MutableStateFlow(false)
+    val isRestoringNavigation: StateFlow<Boolean> = mutableRestoring.asStateFlow()
+    val interruptedQuizCleanupPending: StateFlow<Boolean> = mutableInterruptedQuizCleanup.asStateFlow()
     private val mutableCurriculumState = MutableStateFlow<CurriculumUiState>(CurriculumUiState.Hidden)
     private val mutableLessonState = MutableStateFlow<LessonUiState>(LessonUiState.Hidden)
     private val mutablePlaybackState = MutableStateFlow<PlaybackUiState>(PlaybackUiState.Hidden)
@@ -179,7 +181,6 @@ class CourseListViewModel internal constructor(
     val liveClassesState: StateFlow<DashboardSectionUiState<DashboardLiveClass>> = mutableLiveClassesState.asStateFlow()
     val eventsState: StateFlow<DashboardSectionUiState<DashboardEvent>> = mutableEventsState.asStateFlow()
     val supportActionsState: StateFlow<DashboardSectionUiState<DashboardSupportAction>> = mutableSupportActionsState.asStateFlow()
-    val destination: StateFlow<CourseDestination> = mutableDestination.asStateFlow()
     val curriculumState: StateFlow<CurriculumUiState> = mutableCurriculumState.asStateFlow()
     val lessonState: StateFlow<LessonUiState> = mutableLessonState.asStateFlow()
     val playbackState: StateFlow<PlaybackUiState> = mutablePlaybackState.asStateFlow()
@@ -190,7 +191,14 @@ class CourseListViewModel internal constructor(
         scope.launch {
             session.state.collectLatest { state ->
                 if (state is SessionState.SignedIn) {
-                    if (mutableListState.value == CourseListUiState.SignedOut) loadCourses()
+                    if (mutableListState.value == CourseListUiState.SignedOut) {
+                        loadCourses()
+                        if (quizWebSessionController.hasPendingCleanup()) {
+                            pendingRestoredNavigation = backStack.toList()
+                            mutableInterruptedQuizCleanup.value = true
+                            rehydrateNavigation()
+                        }
+                    }
                 } else {
                     clearForSignedOutSession()
                 }
@@ -210,13 +218,22 @@ class CourseListViewModel internal constructor(
 
     fun openCourse(course: Course) {
         if (session.state.value !is SessionState.SignedIn) return
+        if (backStack.last() is LearningRoute.QuizWeb || mutableInterruptedQuizCleanup.value || quizWebSessionController.hasPendingCleanup()) return
         promoteRecentlyOpenedCourse(course.id)
-        coursePickerParent = when (mutableDestination.value) {
-            CourseDestination.Courses -> CourseDestination.Courses
-            CourseDestination.Dashboard -> CourseDestination.Dashboard
-            else -> coursePickerParent
+        restorationJob?.cancel()
+        pendingRestoredNavigation = null
+        mutableRestoring.value = false
+        mutableRestorationError.value = null
+        mutableRecoveryDismissed.value = false
+        lessonJob?.cancel()
+        clearPlayback()
+        clearCompletion()
+        mutableLessonState.value = LessonUiState.Hidden
+        navigationTouched = true
+        while (backStack.last() != LearningRoute.Dashboard && backStack.last() != LearningRoute.Courses) {
+            backStack.removeLastOrNull()
         }
-        mutableDestination.value = CourseDestination.Curriculum(course)
+        backStack.add(LearningRoute.Curriculum(course.id))
         loadCurriculum(course)
     }
 
@@ -233,39 +250,42 @@ class CourseListViewModel internal constructor(
 
     fun showAllCourses() {
         if (session.state.value !is SessionState.SignedIn) return
-        coursePickerParent = CourseDestination.Dashboard
-        mutableDestination.value = CourseDestination.Courses
+        if (backStack.last() != LearningRoute.Dashboard) return
+        navigationTouched = true
+        backStack.add(LearningRoute.Courses)
     }
 
     fun showDashboard() {
         if (session.state.value !is SessionState.SignedIn) return
-        if (mutableDestination.value == CourseDestination.Courses) {
-            mutableDestination.value = CourseDestination.Dashboard
-        }
+        if (backStack.last() == LearningRoute.Courses) backStack.removeLastOrNull()
     }
 
     fun retryCurriculum() {
-        val course = (mutableDestination.value as? CourseDestination.Curriculum)?.course ?: return
+        val course = activeCurriculumCourse() ?: return
         loadCurriculum(course)
     }
 
     fun openLesson(lesson: Lesson) {
         if (session.state.value !is SessionState.SignedIn) return
-        val course = (mutableDestination.value as? CourseDestination.Curriculum)?.course ?: return
-        mutableDestination.value = CourseDestination.LessonDetail(course, lesson)
+        val course = activeCurriculumCourse() ?: return
+        backStack.add(LearningRoute.LessonDetail(course.id, lesson.id))
         loadLesson(course, lesson)
     }
 
     fun retryLesson() {
-        val destination = mutableDestination.value as? CourseDestination.LessonDetail ?: return
-        loadLesson(destination.course, destination.selectedLesson)
+        val route = backStack.last() as? LearningRoute.LessonDetail ?: return
+        val course = curriculumCourse() ?: return
+        val lesson = (mutableCurriculumState.value as? CurriculumUiState.Content)?.lessons
+            ?.firstOrNull { it.id == route.lessonId } ?: return
+        loadLesson(course, lesson)
     }
 
     fun retryPlayback() {
-        val destination = mutableDestination.value as? CourseDestination.LessonDetail ?: return
+        if (backStack.last() !is LearningRoute.LessonDetail) return
+        val course = curriculumCourse() ?: return
         val lesson = (mutableLessonState.value as? LessonUiState.Content)?.lesson ?: return
         if (lesson.video == null) return
-        authorizePlayback(destination.course, lesson)
+        authorizePlayback(course, lesson)
     }
 
     fun markLessonComplete() {
@@ -297,9 +317,9 @@ class CourseListViewModel internal constructor(
 
     fun openQuiz(quiz: Quiz) {
         if (session.state.value !is SessionState.SignedIn || quizLaunchJob?.isActive == true) return
-        val course = (mutableDestination.value as? CourseDestination.Curriculum)?.course ?: return
-        if (quiz.courseId != course.id) return
-        mutableDestination.value = CourseDestination.QuizWeb(course, quiz)
+        val course = activeCurriculumCourse() ?: return
+        if (quiz.courseId != course.id || mutableInterruptedQuizCleanup.value || quizWebSessionController.hasPendingCleanup()) return
+        backStack.add(LearningRoute.QuizWeb(course.id, quiz.id))
         QuizWebLaunchRequest(
             courseId = course.id,
             quizId = quiz.id,
@@ -317,7 +337,8 @@ class CourseListViewModel internal constructor(
 
     fun returnFromQuiz() {
         if (quizCleanupJob?.isActive == true) return
-        val destination = mutableDestination.value as? CourseDestination.QuizWeb ?: return
+        val route = backStack.last() as? LearningRoute.QuizWeb ?: return
+        val course = curriculumCourse() ?: return
         mutableQuizWebState.value = QuizWebUiState.Closing
         quizCleanupJob = scope.launch {
             when (quizWebSessionController.revokeAndClear()) {
@@ -332,11 +353,12 @@ class CourseListViewModel internal constructor(
                 -> Unit
             }
             clearQuizLaunch()
-            mutableDestination.value = CourseDestination.Curriculum(destination.course)
-            loadCurriculum(destination.course)
+            if (backStack.last() != route || session.state.value !is SessionState.SignedIn) return@launch
+            backStack.removeLastOrNull()
+            loadCurriculum(course)
             curriculumJob?.join()
-            when (val result = repository.getCourseProgress(destination.course.id)) {
-                is ApiResult.Success -> if (result.value.isValidFor(destination.course.id)) {
+            when (val result = repository.getCourseProgress(course.id)) {
+                is ApiResult.Success -> if (result.value.isValidFor(course.id)) {
                     applyCourseProgress(result.value)
                 }
                 is ApiResult.Failure -> Unit
@@ -347,24 +369,189 @@ class CourseListViewModel internal constructor(
     fun retryQuizCleanup() = returnFromQuiz()
 
     fun showCurriculum() {
-        val course = (mutableDestination.value as? CourseDestination.LessonDetail)?.course ?: return
+        if (backStack.last() !is LearningRoute.LessonDetail) return
         lessonJob?.cancel()
         clearPlayback()
         clearCompletion()
         clearQuizLaunch()
-        mutableDestination.value = CourseDestination.Curriculum(course)
+        backStack.removeLastOrNull()
         mutableLessonState.value = LessonUiState.Hidden
     }
 
     fun showCourses() {
+        if (backStack.last() !is LearningRoute.Curriculum) return
         curriculumJob?.cancel()
         lessonJob?.cancel()
         clearPlayback()
         clearCompletion()
         clearQuizLaunch()
-        mutableDestination.value = coursePickerParent
+        backStack.removeLastOrNull()
         mutableCurriculumState.value = CurriculumUiState.Hidden
         mutableLessonState.value = LessonUiState.Hidden
+    }
+
+    fun navigateBack() {
+        if (!mutableRecoveryDismissed.value &&
+            (mutableRestoring.value || mutableRestorationError.value != null || mutableInterruptedQuizCleanup.value)
+        ) {
+            // Back abandons unresolved children, including while their requests are suspended.
+            // Cleanup must still finish/retry before a fresh quiz can launch.
+            val cleanupPending = mutableInterruptedQuizCleanup.value
+            if (!cleanupPending) {
+                restorationJob?.cancel()
+                restorationJob = null
+            }
+            mutableRecoveryDismissed.value = true
+            mutableRestoring.value = false
+            curriculumJob?.cancel()
+            lessonJob?.cancel()
+            mutableRestorationError.value = null
+            while (backStack.last() != LearningRoute.Dashboard && backStack.last() != LearningRoute.Courses) {
+                backStack.removeLastOrNull()
+            }
+            pendingRestoredNavigation = if (cleanupPending) backStack.toList() else null
+            mutableCurriculumState.value = CurriculumUiState.Hidden
+            mutableLessonState.value = LessonUiState.Hidden
+            clearPlayback()
+            clearCompletion()
+            return
+        }
+        when (backStack.last()) {
+            LearningRoute.Dashboard -> Unit
+            LearningRoute.Courses -> showDashboard()
+            is LearningRoute.Curriculum -> showCourses()
+            is LearningRoute.LessonDetail -> showCurriculum()
+            is LearningRoute.QuizWeb -> returnFromQuiz()
+        }
+        if (mutableRecoveryDismissed.value && mutableInterruptedQuizCleanup.value) {
+            pendingRestoredNavigation = backStack.toList()
+        }
+    }
+
+    private fun activeCurriculumCourse(): Course? =
+        (backStack.last() as? LearningRoute.Curriculum)?.let { route ->
+            curriculumCourse()?.takeIf { it.id == route.courseId }
+        }
+
+    private fun curriculumCourse(): Course? = when (val state = mutableCurriculumState.value) {
+        CurriculumUiState.Hidden -> null
+        is CurriculumUiState.Loading -> state.course
+        is CurriculumUiState.Empty -> state.course
+        is CurriculumUiState.Content -> state.course
+        is CurriculumUiState.Error -> state.course
+    }
+
+    internal fun saveNavigation(accountId: Long): String =
+        saveLearningNavigation(accountId, backStack.toList(),
+            mutableInterruptedQuizCleanup.value || quizWebSessionController.hasPendingCleanup())
+
+    internal fun restoreNavigation(accountId: Long, saved: String) {
+        // Rotation retains this VM and an active quiz. Only a fresh VM consumes saved history.
+        if (navigationTouched || session.state.value !is SessionState.SignedIn) return
+        val user = (session.state.value as? SessionState.SignedIn)?.user ?: return
+        if (user.id != accountId) return
+        val restored = restoreLearningNavigation(accountId, saved) ?: return
+        navigationTouched = true
+        mutableRecoveryDismissed.value = false
+        backStack.clear()
+        backStack.addAll(restored.routes)
+        pendingRestoredNavigation = restored.routes
+        mutableInterruptedQuizCleanup.value = restored.interruptedQuiz || quizWebSessionController.hasPendingCleanup()
+        rehydrateNavigation()
+    }
+
+    fun retryInterruptedQuizCleanup() = rehydrateNavigation()
+
+    fun retryNavigationRestoration() = rehydrateNavigation()
+
+    private fun rehydrateNavigation() {
+        if (restorationJob?.isActive == true) return
+        if (pendingRestoredNavigation == null) return
+        val userId = (session.state.value as? SessionState.SignedIn)?.user?.id ?: return
+        mutableRestoring.value = !mutableRecoveryDismissed.value
+        mutableRestorationError.value = null
+        restorationJob = scope.launch {
+            try {
+                if (mutableInterruptedQuizCleanup.value) {
+                    mutableQuizWebState.value = QuizWebUiState.Closing
+                    when (quizWebSessionController.revokeAndClear()) {
+                        QuizWebSessionCleanupResult.Failed -> {
+                            mutableQuizWebState.value = QuizWebUiState.CleanupError(
+                                userFacingStrings.resolve(Res.string.error_close_quiz_session),
+                            )
+                            return@launch
+                        }
+                        QuizWebSessionCleanupResult.Cleared,
+                        QuizWebSessionCleanupResult.NoActiveSession -> {
+                            mutableInterruptedQuizCleanup.value = false
+                            clearQuizLaunch()
+                        }
+                    }
+                }
+                if ((session.state.value as? SessionState.SignedIn)?.user?.id != userId) return@launch
+                // Restore may have supplied a saved route while startup cleanup was suspended.
+                val routes = pendingRestoredNavigation ?: return@launch
+                val curriculumRoute = routes.filterIsInstance<LearningRoute.Curriculum>().lastOrNull()
+                if (curriculumRoute == null) {
+                    pendingRestoredNavigation = null
+                    return@launch
+                }
+                val result = repository.getCourses()
+                if (backStack.toList() != routes) {
+                    if (pendingRestoredNavigation == routes) pendingRestoredNavigation = null
+                    return@launch
+                }
+                val courses = when (result) {
+                    is ApiResult.Success -> result.value
+                    is ApiResult.Failure -> {
+                        mutableRestorationError.value = result.error.localizedUserMessageForState(userFacingStrings)
+                        return@launch
+                    }
+                }
+                val course = courses.firstOrNull { it.id == curriculumRoute.courseId }
+                if (course == null) {
+                    returnToCoursePicker()
+                    return@launch
+                }
+                loadCurriculum(course)
+                curriculumJob?.join()
+                if (backStack.toList() != routes) {
+                    if (pendingRestoredNavigation == routes) pendingRestoredNavigation = null
+                    return@launch
+                }
+                val content = mutableCurriculumState.value as? CurriculumUiState.Content
+                val empty = mutableCurriculumState.value as? CurriculumUiState.Empty
+                val error = mutableCurriculumState.value as? CurriculumUiState.Error
+                if (error != null) {
+                    mutableRestorationError.value = error.message
+                    return@launch
+                }
+                if ((content?.course?.id ?: empty?.course?.id) != course.id) {
+                    mutableRestorationError.value = userFacingStrings.resolve(Res.string.error_invalid_response)
+                    return@launch
+                }
+                val lessonRoute = routes.lastOrNull() as? LearningRoute.LessonDetail
+                if (lessonRoute != null) {
+                    val lesson = content?.lessons?.firstOrNull { it.id == lessonRoute.lessonId }
+                    if (lesson == null) backStack.removeLastOrNull() else loadLesson(content.course, lesson)
+                }
+                pendingRestoredNavigation = null
+            } finally {
+                mutableRestoring.value = false
+            }
+        }
+    }
+
+    private fun returnToCoursePicker() {
+        pendingRestoredNavigation = null
+        mutableRestorationError.value = null
+        backStack.clear()
+        backStack.addAll(listOf(LearningRoute.Dashboard, LearningRoute.Courses))
+        mutableCurriculumState.value = CurriculumUiState.Hidden
+        mutableLessonState.value = LessonUiState.Hidden
+        clearPlayback()
+        clearCompletion()
+        retryCourses()
     }
 
     private fun loadCourses() {
@@ -512,9 +699,6 @@ class CourseListViewModel internal constructor(
             positionSeconds = response.positionSeconds,
         )
         mutableLessonState.value = content.copy(lesson = updatedLesson)
-        mutableDestination.value = (mutableDestination.value as? CourseDestination.LessonDetail)
-            ?.copy(selectedLesson = updatedLesson)
-            ?: mutableDestination.value
         mutableCurriculumState.value = (mutableCurriculumState.value as? CurriculumUiState.Content)
             ?.let { curriculum ->
                 curriculum.copy(
@@ -540,14 +724,6 @@ class CourseListViewModel internal constructor(
         mutableLessonState.value = (mutableLessonState.value as? LessonUiState.Content)
             ?.let { state -> state.copy(course = state.course.updated()) }
             ?: mutableLessonState.value
-        mutableDestination.value = when (val destination = mutableDestination.value) {
-            is CourseDestination.Curriculum -> destination.copy(course = destination.course.updated())
-            is CourseDestination.LessonDetail -> destination.copy(course = destination.course.updated())
-            is CourseDestination.QuizWeb -> destination.copy(course = destination.course.updated())
-            CourseDestination.Dashboard,
-            CourseDestination.Courses,
-            -> destination
-        }
     }
 
     private fun launchQuiz(request: QuizWebLaunchRequest) {
@@ -634,8 +810,16 @@ class CourseListViewModel internal constructor(
         quizCleanupJob?.cancel()
         quizCleanupJob = null
         mutableListState.value = CourseListUiState.SignedOut
-        mutableDestination.value = CourseDestination.Dashboard
-        coursePickerParent = CourseDestination.Dashboard
+        restorationJob?.cancel()
+        restorationJob = null
+        pendingRestoredNavigation = null
+        mutableRestoring.value = false
+        mutableRecoveryDismissed.value = false
+        mutableRestorationError.value = null
+        mutableInterruptedQuizCleanup.value = false
+        navigationTouched = false
+        backStack.clear()
+        backStack.add(LearningRoute.Dashboard)
         mutableCurriculumState.value = CurriculumUiState.Hidden
         mutableLessonState.value = LessonUiState.Hidden
     }

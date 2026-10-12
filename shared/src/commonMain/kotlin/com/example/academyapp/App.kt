@@ -1,13 +1,5 @@
 package com.example.academyapp
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,15 +7,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,20 +35,20 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.academyapp.api.model.AuthOptions
 import com.example.academyapp.api.model.User
-import com.example.academyapp.course.CourseDestination
+import com.example.academyapp.course.navigation.LearningRoute
+import androidx.compose.runtime.saveable.Saver
 import com.example.academyapp.course.CourseListViewModel
 import com.example.academyapp.course.CourseRoute
 import com.example.academyapp.course.QuizWebSessionController
 import com.example.academyapp.design.AcademyDimensions
 import com.example.academyapp.design.AcademySpacing
 import com.example.academyapp.design.AcademyTheme
-import com.example.academyapp.design.components.AcademyAdaptivePane
 import com.example.academyapp.design.components.AcademyAppScaffold
 import com.example.academyapp.design.components.AcademyScreenTransition
-import com.example.academyapp.design.components.AcademySectionHeader
 import com.example.academyapp.design.components.AcademyStateContainer
 import com.example.academyapp.features.account.presentation.AccountRoute
 import com.example.academyapp.features.account.presentation.AccountViewModel
+import com.example.academyapp.features.home.presentation.HomeScreen
 import com.example.academyapp.features.auth.presentation.AuthEntryContent
 import com.example.academyapp.generated.resources.*
 import com.example.academyapp.navigation.AcademyDestination
@@ -234,13 +222,22 @@ private fun AcademyShell(
     deletionState: DeletionRequestState = DeletionRequestState.Idle,
     onRequestDeletion: () -> Unit = {},
 ) {
-    val childDestination by courseListViewModel.destination.collectAsStateWithLifecycle()
+    // Bind saved history to the signed-in account. The VM remains the sole live stack owner.
+    rememberSaveable(user.id, saver = Saver<CourseListViewModel, String>(
+        save = { it.saveNavigation(user.id) },
+        restore = { saved -> courseListViewModel.also { it.restoreNavigation(user.id, saved) } },
+    )) { courseListViewModel }
+    val childDestination = courseListViewModel.backStack.last()
+    val learningRestorationError by courseListViewModel.restorationError.collectAsStateWithLifecycle()
+    val learningRecoveryDismissed by courseListViewModel.recoveryDismissed.collectAsStateWithLifecycle()
+    val isRestoringLearning by courseListViewModel.isRestoringNavigation.collectAsStateWithLifecycle()
+    val interruptedQuizCleanup by courseListViewModel.interruptedQuizCleanupPending.collectAsStateWithLifecycle()
     // Save a primitive value: custom Kotlin state objects are not Bundle-saveable by default.
     var savedRootDestination by rememberSaveable {
         mutableStateOf(initialAuthenticatedDestination(registrationJustCompleted).name)
     }
-    val isQuizVisible = childDestination is CourseDestination.QuizWeb
-    val hasLearningChild = childDestination != CourseDestination.Dashboard
+    val isQuizVisible = childDestination is LearningRoute.QuizWeb
+    val hasLearningChild = childDestination != LearningRoute.Dashboard
     val shellState = AcademyShellState.restore(
         savedRoot = savedRootDestination,
         hasLearningChild = hasLearningChild,
@@ -256,15 +253,10 @@ private fun AcademyShell(
     }
     PlatformBackHandler(
         enabled = shellState.navigation.selectedDestination == AcademyDestination.MyLearning &&
-            shellState.canCloseLearningChild,
+            shellState.canCloseLearningChild && !learningRecoveryDismissed && (isRestoringLearning || interruptedQuizCleanup || learningRestorationError != null),
+        // NavDisplay handles normal Back; this fallback covers its temporary recovery gate.
         onBack = {
-            when (childDestination) {
-                is CourseDestination.QuizWeb -> courseListViewModel.returnFromQuiz()
-                is CourseDestination.LessonDetail -> courseListViewModel.showCurriculum()
-                is CourseDestination.Curriculum -> courseListViewModel.showCourses()
-                CourseDestination.Courses -> courseListViewModel.showDashboard()
-                CourseDestination.Dashboard -> Unit
-            }
+            courseListViewModel.navigateBack()
         },
     )
 
@@ -290,12 +282,16 @@ private fun AcademyShell(
         ) { destination ->
             when (destination) {
                 AcademyDestination.Home -> HomeScreen(
-                    displayName = firstName(user.displayName),
-                    coursesState = courseListViewModel.listState.collectAsStateWithLifecycle().value,
+                    summary = courseListViewModel.listState.collectAsStateWithLifecycle().value
+                        .toHomeSummary(user.displayName),
                     onViewCourses = { savedRootDestination = AcademyDestination.MyLearning.name },
-                    onCourseSelected = { course ->
-                        savedRootDestination = AcademyDestination.MyLearning.name
-                        courseListViewModel.openCourse(course)
+                    onCourseSelected = { courseId ->
+                        openHomeCourse(
+                            courseId = courseId,
+                            state = courseListViewModel.listState.value,
+                            onNavigate = { savedRootDestination = AcademyDestination.MyLearning.name },
+                            onOpenCourse = courseListViewModel::openCourse,
+                        )
                     },
                 )
                 AcademyDestination.MyLearning -> CourseRoute(
@@ -315,89 +311,6 @@ private fun AcademyShell(
             }
         }
     }
-}
-
-private fun firstName(displayName: String): String =
-    displayName.trim().takeWhile { !it.isWhitespace() }.ifBlank { displayName }
-
-@Composable
-private fun HomeScreen(
-    displayName: String,
-    coursesState: com.example.academyapp.course.CourseListUiState,
-    onViewCourses: () -> Unit,
-    onCourseSelected: (com.example.academyapp.api.model.Course) -> Unit,
-) {
-    val loadedCourses = (coursesState as? com.example.academyapp.course.CourseListUiState.Content)?.courses
-    val inProgressCourse = loadedCourses.orEmpty()
-        .filter { it.progressPercent in 1..99 }
-        .singleOrNull()
-    AcademyAdaptivePane(
-        primary = { twoPane ->
-            Column(
-                modifier = if (twoPane) Modifier.fillMaxSize().verticalScroll(rememberScrollState()) else Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(AcademySpacing.Large),
-            ) {
-                Text(stringResource(Res.string.nav_home), style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    stringResource(Res.string.home_welcome, displayName),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                AnimatedVisibility(
-                    visible = inProgressCourse != null,
-                    enter = fadeIn(tween(240)) + slideInVertically(tween(240)) { it / 12 },
-                    exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 16 },
-                ) {
-                    inProgressCourse?.let { course ->
-                        com.example.academyapp.design.components.AcademyHeroCourseCard(
-                            course,
-                            onClick = { onCourseSelected(course) },
-                        )
-                    }
-                }
-            }
-        },
-        secondary = {
-            Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(AcademySpacing.Large),
-            ) {
-                AnimatedContent(
-                    targetState = loadedCourses != null,
-                    transitionSpec = {
-                        (fadeIn(tween(240)) + slideInVertically(tween(240)) { it / 12 }) togetherWith
-                            (fadeOut(tween(120)) + slideOutVertically(tween(120)) { -it / 16 })
-                    },
-                    label = "home-course-content-transition",
-                ) { hasLoadedCourses ->
-                    if (hasLoadedCourses) {
-                        Column(verticalArrangement = Arrangement.spacedBy(AcademySpacing.Large)) {
-                            AcademySectionHeader(stringResource(Res.string.home_my_learning_title))
-                            loadedCourses.orEmpty().take(3).forEach { course ->
-                                com.example.academyapp.design.components.AcademyCourseCard(
-                                    course,
-                                    { onCourseSelected(course) },
-                                )
-                            }
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(AcademySpacing.Large)) {
-                            AcademySectionHeader(
-                                stringResource(Res.string.home_my_learning_title),
-                                stringResource(Res.string.home_my_learning_description),
-                            )
-                            Button(
-                                onClick = onViewCourses,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = com.example.academyapp.design.AcademyShapes.Pill,
-                            ) {
-                                Text(stringResource(Res.string.home_view_courses))
-                            }
-                        }
-                    }
-                }
-            }
-        },
-    )
 }
 
 @Composable
@@ -439,41 +352,6 @@ fun AcademyAppPreview() {
                 onLogout = {},
                 authOptions = AuthOptions(true, true, "https://example.test/terms", "https://example.test/privacy"),
                 signedInContent = {},
-            )
-        }
-    }
-}
-
-@Preview(widthDp = 390, heightDp = 844, name = "Inicio · compact")
-@Composable
-fun AcademyHomeCompactPreview() {
-    AcademyTheme {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().padding(AcademySpacing.Medium), verticalArrangement = Arrangement.spacedBy(AcademySpacing.Large)) {
-                HomeScreen("Ana García", com.example.academyapp.course.CourseListUiState.Content(listOf(
-                    com.example.academyapp.api.model.Course(1, "Neuroeducación y aprendizaje", "Aprende estrategias para el aula.", null, 42, listOf("Neuroeducación")),
-                    com.example.academyapp.api.model.Course(2, "Desarrollo socioemocional", "", null, 0, emptyList()),
-                )), {}, {})
-            }
-        }
-    }
-}
-
-@Preview(widthDp = 914, heightDp = 411, name = "Inicio · phone landscape")
-@Composable
-fun AcademyHomeLandscapePreview() {
-    AcademyTheme {
-        Surface(Modifier.fillMaxSize().padding(AcademySpacing.Medium), color = MaterialTheme.colorScheme.background) {
-            HomeScreen(
-                "Ana García",
-                com.example.academyapp.course.CourseListUiState.Content(
-                    listOf(
-                        com.example.academyapp.api.model.Course(1, "Neuroeducación y aprendizaje", "Aprende estrategias para el aula.", null, 42, listOf("Neuroeducación")),
-                        com.example.academyapp.api.model.Course(2, "Desarrollo socioemocional", "", null, 0, emptyList()),
-                    ),
-                ),
-                {},
-                {},
             )
         }
     }

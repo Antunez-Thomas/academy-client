@@ -6,7 +6,7 @@
 [![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.11.1-blue?logo=jetpackcompose)](https://www.jetbrains.com/compose-multiplatform/)
 [![Ktor](https://img.shields.io/badge/Ktor-3.5.2-blue?logo=ktor)](https://ktor.io)
 [![Android](https://img.shields.io/badge/Android-minSdk%2026-green?logo=android)]()
-[![Tests](https://img.shields.io/badge/tests-137-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-168-brightgreen)](#testing)
 [![CI](https://github.com/Antunez-Thomas/academy-client/actions/workflows/ci.yml/badge.svg)](https://github.com/Antunez-Thomas/academy-client/actions/workflows/ci.yml)
 
 > **Client-only repository.** The WordPress plugin that exposes the curated REST API lives in a separate, private repository. Everything here is the mobile app: shared UI, networking, session, and platform integrations.
@@ -60,6 +60,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design: layering, session li
 | Session | Custom single-flight refresh-token rotation · `StateFlow` state machine |
 | Secure storage | Android Keystore (AES-GCM) · iOS Keychain (device-only) |
 | View models | `androidx.lifecycle` ViewModels in `commonMain` |
+| Navigation | Navigation 3 (JetBrains multiplatform) — serializable `NavKey` child stack for Learning; hand-rolled root tabs |
 | Tests | `kotlin-test` · Ktor `MockEngine` · coroutines-test · Android instrumentation |
 | Build | Gradle 9.3.1 (Kotlin DSL, version catalog) · JDK 21 · AGP 9.1.1 |
 
@@ -68,7 +69,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design: layering, session li
 - **Authentication** — sign in, registration with legal-consent flow, password reset, session restore on cold start, expiry handling.
 - **Token refresh** — single-flight rotation: N concurrent 401s trigger exactly **one** refresh call, the replacement pair is persisted *before* it is published, and the failed request is retried once. Covered by concurrency tests (12-way fan-out, logout-vs-refresh races).
 - **Secure storage** — tokens encrypted with a non-exportable Keystore key on Android; Keychain with `AfterFirstUnlockThisDeviceOnly` accessibility on iOS.
-- **Learning** — My Learning dashboard, entitled courses, curriculum tree, lesson/topic details, progress saves with idempotency keys, explicit lesson completion.
+- **Learning** — My Learning dashboard, entitled courses, curriculum tree, lesson/topic details, progress saves with idempotency keys, explicit lesson completion. The Learning flow runs on a Navigation 3 back stack with validated history restoration; quiz routes are discarded on process death instead of being restored.
 - **Video** — authorized hosted embed playback with strict HTTPS URL validation, main-frame navigation allowlisting, and full WebView teardown when the lesson closes.
 - **Quizzes** — LearnDash-style quizzes rendered in an **isolated WebView session** (separate data store/profile), single-use launch tickets redeemed via form POST, and explicit logout cleanup of browsing data.
 - **Account** — profile editing, avatar upload/remove, account-deletion request flow.
@@ -129,7 +130,7 @@ shared/        All shared code
     ├── commonMain/    UI, view models, API, session, design system
     ├── androidMain/   Keystore, Android engine, WebView actuals
     ├── iosMain/       Keychain, Darwin engine, WKWebView actuals
-    ├── commonTest/    120 shared tests (MockEngine contract, session concurrency, VMs)
+    ├── commonTest/    150 shared tests (MockEngine contract, session concurrency, VMs, Nav3 routes)
     ├── androidHostTest/  JVM/host tests + opt-in live integration test
     ├── androidDeviceTest/ instrumentation tests (Keystore, WebView)
     └── iosTest/       Keychain & environment tests (run on macOS)
@@ -138,7 +139,7 @@ scripts/       agent-check.sh — deterministic verification harness
 
 ## Testing
 
-**137 tests** across four source sets:
+**168 tests** across four source sets:
 
 - **API contract** — Ktor `MockEngine` fixtures assert exact request shape, response decoding, and HTTP→error mapping, including malformed bodies and timeout/offline cases.
 - **Session concurrency** — concurrent refresh fan-out, rejected refresh → expired, transient failure keeps tokens, logout during refresh.

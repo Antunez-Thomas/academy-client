@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotSame
@@ -31,6 +32,23 @@ class AcademyQuizWebViewAndroidTest {
         assertEquals(logoutUrl, recreatedControllerStore.read())
         recreatedControllerStore.clear()
         assertNull(firstControllerStore.read())
+    }
+
+    @Test
+    fun recreatedControllerExposesOnlyValidatedPendingCleanupMetadata() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferencesName = "academy_quiz_pending_test_${System.nanoTime()}"
+        val store = QuizWebLogoutUrlStore(context, preferencesName)
+        val apiBase = "http://10.0.2.2:8080/wp-json/academy-mobile/v1/"
+        try {
+            store.write("${apiBase}quiz/web-logout")
+            assertTrue(AndroidQuizWebSessionController(context, apiBase, preferencesName).hasPendingCleanup())
+            assertFalse(AndroidQuizWebSessionController(context,
+                "https://example.test/wp-json/academy-mobile/v1/", preferencesName).hasPendingCleanup())
+            assertNull(store.read())
+        } finally {
+            store.clear()
+        }
     }
 
     @Test

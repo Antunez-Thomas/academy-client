@@ -1,5 +1,7 @@
 package com.example.academyapp.course
 
+import com.example.academyapp.course.navigation.LearningRoute
+
 import com.example.academyapp.testUserFacingStrings
 import com.example.academyapp.api.ApiResult
 import com.example.academyapp.api.AcademyApi
@@ -238,28 +240,28 @@ class CourseListViewModelTest {
 
         runCurrent()
 
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         val loadedCourses = assertIs<CourseListUiState.Content>(viewModel.listState.value).courses
         assertEquals(courses.take(COURSE_DASHBOARD_PREVIEW_LIMIT), dashboardPreviewCourses(loadedCourses))
         assertEquals(courses, loadedCourses)
         assertEquals(1, repository.courseCalls)
 
         viewModel.showAllCourses()
-        assertEquals(CourseDestination.Courses, viewModel.destination.value)
+        assertEquals(LearningRoute.Courses, viewModel.backStack.last())
         assertEquals(courses, assertIs<CourseListUiState.Content>(viewModel.listState.value).courses)
 
         viewModel.openCourse(courses.last())
         runCurrent()
-        assertEquals(CourseDestination.Curriculum(courses.last()), viewModel.destination.value)
+        assertEquals(LearningRoute.Curriculum(courses.last().id), viewModel.backStack.last())
         viewModel.showCourses()
-        assertEquals(CourseDestination.Courses, viewModel.destination.value)
+        assertEquals(LearningRoute.Courses, viewModel.backStack.last())
 
         viewModel.showDashboard()
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         viewModel.openCourse(courses.first())
         runCurrent()
         viewModel.showCourses()
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         assertEquals(1, repository.courseCalls)
     }
 
@@ -342,12 +344,12 @@ class CourseListViewModelTest {
         viewModel.openCourse(COURSE)
         runCurrent()
 
-        assertEquals(CourseDestination.Curriculum(COURSE), viewModel.destination.value)
+        assertEquals(LearningRoute.Curriculum(COURSE.id), viewModel.backStack.last())
         val content = assertIs<CurriculumUiState.Content>(viewModel.curriculumState.value)
         assertEquals(listOf(LESSON), content.lessons)
 
         viewModel.showCourses()
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         assertEquals(CurriculumUiState.Hidden, viewModel.curriculumState.value)
     }
 
@@ -374,7 +376,7 @@ class CourseListViewModelTest {
         viewModel.openLesson(LESSON)
         runCurrent()
 
-        assertEquals(CourseDestination.LessonDetail(COURSE, LESSON), viewModel.destination.value)
+        assertEquals(LearningRoute.LessonDetail(COURSE.id, LESSON.id), viewModel.backStack.last())
         assertEquals(LessonUiState.Loading(COURSE, LESSON), viewModel.lessonState.value)
         assertEquals(listOf(COURSE.id to LESSON.id), repository.lessonRequests)
 
@@ -483,7 +485,7 @@ class CourseListViewModelTest {
         playbackGate.complete(Unit)
         runCurrent()
 
-        assertEquals(CourseDestination.Curriculum(COURSE), viewModel.destination.value)
+        assertEquals(LearningRoute.Curriculum(COURSE.id), viewModel.backStack.last())
         assertEquals(PlaybackUiState.Hidden, viewModel.playbackState.value)
     }
 
@@ -545,7 +547,7 @@ class CourseListViewModelTest {
         assertEquals(2, repository.lessonRequests.size)
 
         viewModel.showCurriculum()
-        assertEquals(CourseDestination.Curriculum(COURSE), viewModel.destination.value)
+        assertEquals(LearningRoute.Curriculum(COURSE.id), viewModel.backStack.last())
         assertEquals(LessonUiState.Hidden, viewModel.lessonState.value)
         assertEquals(PlaybackUiState.Hidden, viewModel.playbackState.value)
         assertIs<CurriculumUiState.Content>(viewModel.curriculumState.value)
@@ -572,7 +574,7 @@ class CourseListViewModelTest {
         session.logout()
         runCurrent()
 
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         assertEquals(LessonUiState.Hidden, viewModel.lessonState.value)
         assertEquals(PlaybackUiState.Hidden, viewModel.playbackState.value)
         assertEquals(CourseListUiState.SignedOut, viewModel.listState.value)
@@ -828,7 +830,7 @@ class CourseListViewModelTest {
         gate.complete(Unit)
         runCurrent()
 
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         assertEquals(LessonUiState.Hidden, viewModel.lessonState.value)
         assertEquals(LessonCompletionUiState.Hidden, viewModel.completionState.value)
         assertEquals(listOf(LESSON.id to PROGRESS_REQUEST), repository.progressRequests)
@@ -851,7 +853,7 @@ class CourseListViewModelTest {
         viewModel.openQuiz(QUIZ)
         runCurrent()
 
-        assertEquals(CourseDestination.QuizWeb(COURSE, QUIZ), viewModel.destination.value)
+        assertEquals(LearningRoute.QuizWeb(COURSE.id, QUIZ.id), viewModel.backStack.last())
         assertEquals(listOf(QUIZ_REQUEST), repository.quizLaunchRequests)
         assertEquals(QUIZ_LAUNCH, assertIs<QuizWebUiState.Ready>(viewModel.quizWebState.value).launch)
     }
@@ -963,11 +965,11 @@ class CourseListViewModelTest {
             viewModel.returnFromQuiz()
             runCurrent()
 
-            assertEquals(CourseDestination.Curriculum(COURSE.copy(progressPercent = 50)), viewModel.destination.value)
+            assertEquals(LearningRoute.Curriculum(COURSE.id), viewModel.backStack.last())
             viewModel.showCourses()
             assertEquals(
-                if (openedFromAllCourses) CourseDestination.Courses else CourseDestination.Dashboard,
-                viewModel.destination.value,
+                if (openedFromAllCourses) LearningRoute.Courses else LearningRoute.Dashboard,
+                viewModel.backStack.last(),
             )
         }
     }
@@ -994,7 +996,7 @@ class CourseListViewModelTest {
         viewModel.returnFromQuiz()
         runCurrent()
 
-        assertEquals(CourseDestination.QuizWeb(COURSE, QUIZ), viewModel.destination.value)
+        assertEquals(LearningRoute.QuizWeb(COURSE.id, QUIZ.id), viewModel.backStack.last())
         assertIs<QuizWebUiState.CleanupError>(viewModel.quizWebState.value)
         assertTrue(repository.courseProgressRequests.isEmpty())
 
@@ -1003,7 +1005,7 @@ class CourseListViewModelTest {
         runCurrent()
 
         assertEquals(2, controller.revokeCalls)
-        assertEquals(CourseDestination.Curriculum(COURSE.copy(progressPercent = 50)), viewModel.destination.value)
+        assertEquals(LearningRoute.Curriculum(COURSE.id), viewModel.backStack.last())
         assertEquals(QuizWebUiState.Hidden, viewModel.quizWebState.value)
         assertEquals(listOf(COURSE.id), repository.courseProgressRequests)
     }
@@ -1032,7 +1034,7 @@ class CourseListViewModelTest {
         gate.complete(Unit)
         runCurrent()
 
-        assertEquals(CourseDestination.Dashboard, viewModel.destination.value)
+        assertEquals(LearningRoute.Dashboard, viewModel.backStack.last())
         assertEquals(QuizWebUiState.Hidden, viewModel.quizWebState.value)
     }
 
@@ -1058,6 +1060,434 @@ class CourseListViewModelTest {
         assertTrue(first.matches(Regex("[A-Za-z0-9._:-]+")))
     }
 
+    @Test
+    fun restoredLessonRehydratesIdsAndBackReturnsToItsCurriculum() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        val routes = listOf(LearningRoute.Dashboard, LearningRoute.Courses,
+            LearningRoute.Curriculum(COURSE.id), LearningRoute.LessonDetail(COURSE.id, LESSON.id))
+        vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+        runCurrent()
+        assertEquals(routes, vm.backStack.toList())
+        assertIs<LessonUiState.Content>(vm.lessonState.value)
+        assertFalse(vm.isRestoringNavigation.value)
+        vm.navigateBack()
+        assertEquals(routes.dropLast(1), vm.backStack.toList())
+        vm.navigateBack()
+        assertEquals(listOf(LearningRoute.Dashboard, LearningRoute.Courses), vm.backStack.toList())
+    }
+
+    @Test
+    fun interruptedQuizNeverLaunchesAndCleanupFailureBlocksFreshAttemptUntilRetry() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val controller = RecordingQuizWebSessionController(QuizWebSessionCleanupResult.Failed)
+        val vm = CourseListViewModel(session, repository, backgroundScope,
+            quizWebSessionController = controller, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        val routes = listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id),
+            LearningRoute.QuizWeb(COURSE.id, QUIZ.id))
+        vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+        assertEquals(LearningRoute.Curriculum(COURSE.id), vm.backStack.last())
+        runCurrent()
+        assertTrue(vm.interruptedQuizCleanupPending.value)
+        assertIs<QuizWebUiState.CleanupError>(vm.quizWebState.value)
+        vm.openQuiz(QUIZ)
+        runCurrent()
+        assertTrue(repository.quizLaunchRequests.isEmpty())
+        assertTrue(repository.progressRequests.isEmpty())
+        controller.result = QuizWebSessionCleanupResult.Cleared
+        vm.retryInterruptedQuizCleanup()
+        runCurrent()
+        assertEquals(2, controller.revokeCalls)
+        assertFalse(vm.interruptedQuizCleanupPending.value)
+        assertIs<CurriculumUiState.Content>(vm.curriculumState.value)
+        vm.openQuiz(QUIZ)
+        runCurrent()
+        assertEquals(1, repository.quizLaunchRequests.size)
+        assertTrue(repository.progressRequests.isEmpty())
+    }
+
+    @Test
+    fun unavailableRestoredCourseAndMissingLessonReturnSafely() = runTest {
+        for (missingCourse in listOf(false, true)) {
+            val session = signedInSession()
+            val repository = FakeCourseRepository(ApiResult.Success(if (missingCourse) emptyList() else listOf(COURSE)),
+                contentResult = ApiResult.Success(COURSE_CONTENT.copy(steps = emptyList())))
+            val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+            runCurrent()
+            val routes = listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id),
+                LearningRoute.LessonDetail(COURSE.id, LESSON.id))
+            vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+            runCurrent()
+            assertEquals(if (missingCourse) LearningRoute.Courses else LearningRoute.Curriculum(COURSE.id), vm.backStack.last())
+            assertEquals(LessonUiState.Hidden, vm.lessonState.value)
+        }
+    }
+
+    @Test
+    fun retainedQuizSurvivesConfigurationRestoreWhileFreshVmDiscardsIt() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        vm.openCourse(COURSE)
+        runCurrent()
+        vm.openQuiz(QUIZ)
+        runCurrent()
+        vm.restoreNavigation(USER.id, vm.saveNavigation(USER.id))
+        assertIs<LearningRoute.QuizWeb>(vm.backStack.last())
+        assertFalse(vm.interruptedQuizCleanupPending.value)
+    }
+
+    @Test
+    fun interruptedQuizCleanupSuccessDiscardsAttemptWithoutProgressAndForeignOwnerCannotRestore() = runTest {
+        for (result in listOf(QuizWebSessionCleanupResult.Cleared, QuizWebSessionCleanupResult.NoActiveSession)) {
+            val session = signedInSession()
+            val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+            val controller = RecordingQuizWebSessionController(result)
+            val vm = CourseListViewModel(session, repository, backgroundScope,
+                quizWebSessionController = controller, userFacingStrings = testUserFacingStrings)
+            runCurrent()
+            val routes = listOf(LearningRoute.Dashboard, LearningRoute.Courses,
+                LearningRoute.Curriculum(COURSE.id), LearningRoute.QuizWeb(COURSE.id, QUIZ.id))
+            val saved = com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes)
+            vm.restoreNavigation(USER.id + 1, saved)
+            assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+            vm.restoreNavigation(USER.id, saved)
+            runCurrent()
+            assertEquals(routes.dropLast(1), vm.backStack.toList())
+            assertEquals(1, controller.revokeCalls)
+            assertEquals(QuizWebUiState.Hidden, vm.quizWebState.value)
+            assertFalse(vm.interruptedQuizCleanupPending.value)
+            assertTrue(repository.quizLaunchRequests.isEmpty())
+            assertTrue(repository.progressRequests.isEmpty())
+            assertTrue(repository.courseProgressRequests.isEmpty())
+        }
+    }
+
+    @Test
+    fun persistedCleanupWithoutSavedRouteBlocksQuizUntilCleanupHandled() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val controller = RecordingQuizWebSessionController(QuizWebSessionCleanupResult.Failed, pendingCleanup = true)
+        val vm = CourseListViewModel(session, repository, backgroundScope,
+            quizWebSessionController = controller, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+        assertEquals(1, controller.revokeCalls)
+        assertTrue(vm.interruptedQuizCleanupPending.value)
+        vm.openCourse(COURSE)
+        vm.openQuiz(QUIZ)
+        runCurrent()
+        assertTrue(repository.quizLaunchRequests.isEmpty())
+        assertTrue(repository.progressRequests.isEmpty())
+        controller.result = QuizWebSessionCleanupResult.Cleared
+        vm.retryInterruptedQuizCleanup()
+        runCurrent()
+        assertFalse(vm.interruptedQuizCleanupPending.value)
+        vm.openCourse(COURSE)
+        runCurrent()
+        vm.openQuiz(QUIZ)
+        runCurrent()
+        assertIs<LearningRoute.QuizWeb>(vm.backStack.last())
+        assertEquals(1, repository.quizLaunchRequests.size)
+    }
+
+    @Test
+    fun deniedRestoredCourseContentPreservesRouteAndAllowsExplicitBack() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)),
+            contentResult = ApiResult.Failure(AcademyApiError.Forbidden(null)))
+        val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id,
+            listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id))))
+        runCurrent()
+        assertEquals(listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id)), vm.backStack.toList())
+        assertEquals("Tu cuenta no tiene acceso a este contenido.", vm.restorationError.value)
+        assertFalse(vm.isRestoringNavigation.value)
+        vm.navigateBack()
+        assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+        assertEquals(CurriculumUiState.Hidden, vm.curriculumState.value)
+        assertEquals(null, vm.restorationError.value)
+    }
+
+    @Test
+    fun savedRouteArrivingDuringStartupCleanupIsRehydratedAfterCleanup() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val gate = CompletableDeferred<Unit>()
+        val controller = RecordingQuizWebSessionController(pendingCleanup = true, gate = gate)
+        val vm = CourseListViewModel(session, repository, backgroundScope,
+            quizWebSessionController = controller, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        assertTrue(vm.isRestoringNavigation.value)
+        val routes = listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id),
+            LearningRoute.QuizWeb(COURSE.id, QUIZ.id))
+        vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(routes.dropLast(1), vm.backStack.toList())
+        assertIs<CurriculumUiState.Content>(vm.curriculumState.value)
+        assertEquals(1, controller.revokeCalls)
+        assertFalse(vm.interruptedQuizCleanupPending.value)
+        assertTrue(repository.quizLaunchRequests.isEmpty())
+    }
+
+    @Test
+    fun signOutCancelsPendingRestorationAndLateCleanupCannotRestoreChild() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val gate = CompletableDeferred<Unit>()
+        val controller = RecordingQuizWebSessionController(pendingCleanup = true, gate = gate)
+        val vm = CourseListViewModel(session, repository, backgroundScope,
+            quizWebSessionController = controller, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        val saved = com.example.academyapp.course.navigation.saveLearningNavigation(USER.id,
+            listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id)))
+        vm.restoreNavigation(USER.id, saved)
+        session.logout()
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+        assertEquals(CourseListUiState.SignedOut, vm.listState.value)
+        assertFalse(vm.isRestoringNavigation.value)
+        assertFalse(vm.interruptedQuizCleanupPending.value)
+        vm.restoreNavigation(USER.id, saved)
+        assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+    }
+
+    @Test
+    fun courseListRestorationFailuresPreserveSavedLessonAndRetryOriginalRoute() = runTest {
+        for (failure in listOf(AcademyApiError.NoConnection(IllegalStateException("synthetic offline")),
+            AcademyApiError.Server(503, null))) {
+            val session = signedInSession()
+            val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+            val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+            runCurrent()
+            val routes = listOf(LearningRoute.Dashboard, LearningRoute.Courses,
+                LearningRoute.Curriculum(COURSE.id), LearningRoute.LessonDetail(COURSE.id, LESSON.id))
+            repository.coursesResult = ApiResult.Failure(failure)
+            vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+            runCurrent()
+            assertEquals(routes, vm.backStack.toList())
+            assertTrue(vm.restorationError.value != null)
+            assertFalse(vm.isRestoringNavigation.value)
+            assertEquals(routes, com.example.academyapp.course.navigation.restoreLearningNavigation(
+                USER.id, vm.saveNavigation(USER.id))!!.routes)
+            vm.retryNavigationRestoration()
+            runCurrent()
+            assertEquals(routes, vm.backStack.toList())
+            assertTrue(vm.restorationError.value != null)
+            repository.coursesResult = ApiResult.Success(listOf(COURSE))
+            vm.retryNavigationRestoration()
+            assertEquals(null, vm.restorationError.value)
+            runCurrent()
+            assertEquals(routes, vm.backStack.toList())
+            assertIs<LessonUiState.Content>(vm.lessonState.value)
+            assertEquals(null, vm.restorationError.value)
+            assertTrue(repository.progressRequests.isEmpty())
+        }
+    }
+
+    @Test
+    fun curriculumRestorationFailuresPreserveHistoryAndRetryToContent() = runTest {
+        for (failure in listOf(AcademyApiError.NoConnection(IllegalStateException("synthetic offline")),
+            AcademyApiError.Server(503, null))) {
+            val session = signedInSession()
+            val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)),
+                contentResult = ApiResult.Failure(failure))
+            val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+            runCurrent()
+            val routes = listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id))
+            vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+            runCurrent()
+            assertEquals(routes, vm.backStack.toList())
+            assertIs<CurriculumUiState.Error>(vm.curriculumState.value)
+            assertTrue(vm.restorationError.value != null)
+            assertFalse(vm.isRestoringNavigation.value)
+            repository.contentResult = ApiResult.Success(COURSE_CONTENT)
+            vm.retryNavigationRestoration()
+            runCurrent()
+            assertEquals(routes, vm.backStack.toList())
+            assertIs<CurriculumUiState.Content>(vm.curriculumState.value)
+            assertEquals(null, vm.restorationError.value)
+            vm.navigateBack()
+            assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+        }
+    }
+
+    @Test
+    fun restoredCourseConfirmedAbsentOnRetryStillFallsBackToPicker() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        repository.coursesResult = ApiResult.Failure(AcademyApiError.Server(503, null))
+        val routes = listOf(LearningRoute.Dashboard, LearningRoute.Curriculum(COURSE.id))
+        vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+        runCurrent()
+        assertEquals(routes, vm.backStack.toList())
+        repository.coursesResult = ApiResult.Success(emptyList())
+        vm.retryNavigationRestoration()
+        runCurrent()
+        assertEquals(listOf(LearningRoute.Dashboard, LearningRoute.Courses), vm.backStack.toList())
+        assertEquals(null, vm.restorationError.value)
+    }
+
+    @Test
+    fun explicitBackFromFailedLessonRestorationReturnsToKnownParent() = runTest {
+        val session = signedInSession()
+        val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+        val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+        runCurrent()
+        repository.coursesResult = ApiResult.Failure(AcademyApiError.Server(503, null))
+        val routes = listOf(LearningRoute.Dashboard, LearningRoute.Courses,
+            LearningRoute.Curriculum(COURSE.id), LearningRoute.LessonDetail(COURSE.id, LESSON.id))
+        vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+        runCurrent()
+        vm.navigateBack()
+        assertEquals(listOf(LearningRoute.Dashboard, LearningRoute.Courses), vm.backStack.toList())
+        assertEquals(null, vm.restorationError.value)
+        repository.coursesResult = ApiResult.Success(listOf(COURSE))
+        vm.retryNavigationRestoration()
+        runCurrent()
+        assertEquals(listOf(LearningRoute.Dashboard, LearningRoute.Courses), vm.backStack.toList())
+    }
+
+    @Test
+    fun backDuringCourseOrCurriculumRestorationCancelsAndKeepsRenderableParent() = runTest {
+        for (picker in listOf(false, true)) for (waitingForCourses in listOf(false, true)) {
+            val session = signedInSession()
+            val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+            val vm = CourseListViewModel(session, repository, backgroundScope, userFacingStrings = testUserFacingStrings)
+            runCurrent()
+            val gate = CompletableDeferred<Unit>()
+            if (waitingForCourses) repository.coursesGate = gate else repository.contentGate = gate
+            val parent = if (picker) listOf(LearningRoute.Dashboard, LearningRoute.Courses)
+                else listOf(LearningRoute.Dashboard)
+            val routes = parent + listOf(LearningRoute.Curriculum(COURSE.id),
+                LearningRoute.LessonDetail(COURSE.id, LESSON.id))
+            vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+            runCurrent()
+            assertTrue(vm.isRestoringNavigation.value)
+            assertEquals(null, vm.restorationError.value)
+            vm.navigateBack()
+            assertEquals(parent, vm.backStack.toList())
+            assertFalse(vm.isRestoringNavigation.value)
+            assertEquals(CurriculumUiState.Hidden, vm.curriculumState.value)
+            assertEquals(LessonUiState.Hidden, vm.lessonState.value)
+            gate.complete(Unit)
+            runCurrent()
+            vm.retryNavigationRestoration()
+            runCurrent()
+            assertEquals(parent, vm.backStack.toList())
+            assertEquals(CurriculumUiState.Hidden, vm.curriculumState.value)
+            assertEquals(LessonUiState.Hidden, vm.lessonState.value)
+            assertEquals(null, vm.restorationError.value)
+            assertTrue(repository.lessonRequests.isEmpty())
+            vm.openCourse(COURSE)
+            runCurrent()
+            assertEquals(LearningRoute.Curriculum(COURSE.id), vm.backStack.last())
+            assertIs<CurriculumUiState.Content>(vm.curriculumState.value)
+        }
+    }
+
+    @Test
+    fun backDuringInterruptedCleanupRendersParentWhileCleanupAndRetryStayPending() = runTest {
+        for (picker in listOf(false, true)) {
+            val session = signedInSession()
+            val repository = FakeCourseRepository(ApiResult.Success(listOf(COURSE)))
+            val gate = CompletableDeferred<Unit>()
+            val controller = RecordingQuizWebSessionController(QuizWebSessionCleanupResult.Failed, gate = gate)
+            val vm = CourseListViewModel(session, repository, backgroundScope,
+                quizWebSessionController = controller, userFacingStrings = testUserFacingStrings)
+            runCurrent()
+            val parent = if (picker) listOf(LearningRoute.Dashboard, LearningRoute.Courses)
+                else listOf(LearningRoute.Dashboard)
+            val routes = parent + listOf(LearningRoute.Curriculum(COURSE.id),
+                LearningRoute.QuizWeb(COURSE.id, QUIZ.id))
+            vm.restoreNavigation(USER.id, com.example.academyapp.course.navigation.saveLearningNavigation(USER.id, routes))
+            runCurrent()
+            assertEquals(LearningRecoveryPresentation.Loading, recoveryPresentation(vm))
+
+            vm.navigateBack()
+            assertEquals(parent, vm.backStack.toList())
+            assertTrue(vm.interruptedQuizCleanupPending.value)
+            assertTrue(vm.recoveryDismissed.value)
+            assertFalse(vm.isRestoringNavigation.value)
+            // This is the exact selector used by CourseRoute: assert visibility before releasing cleanup.
+            assertEquals(LearningRecoveryPresentation.Parent, recoveryPresentation(vm))
+            assertIs<CourseListUiState.Content>(vm.listState.value)
+            assertFalse(gate.isCompleted)
+            assertEquals(0, controller.revokeCalls)
+            vm.openCourse(COURSE)
+            vm.retryInterruptedQuizCleanup()
+            runCurrent()
+            assertEquals(parent, vm.backStack.toList())
+            assertEquals(LearningRecoveryPresentation.Parent, recoveryPresentation(vm))
+            // Parent navigation remains usable while the same cleanup coroutine is suspended.
+            if (picker) vm.navigateBack()
+            assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+            assertFalse(gate.isCompleted)
+
+            gate.complete(Unit)
+            runCurrent()
+            assertEquals(1, controller.revokeCalls)
+            assertIs<QuizWebUiState.CleanupError>(vm.quizWebState.value)
+            assertEquals(LearningRecoveryPresentation.Parent, recoveryPresentation(vm))
+            vm.openCourse(COURSE)
+            assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+
+            val retryGate = CompletableDeferred<Unit>()
+            controller.gate = retryGate
+            controller.result = QuizWebSessionCleanupResult.Cleared
+            vm.retryInterruptedQuizCleanup()
+            runCurrent()
+            assertIs<QuizWebUiState.Closing>(vm.quizWebState.value)
+            assertTrue(vm.interruptedQuizCleanupPending.value)
+            assertFalse(vm.isRestoringNavigation.value)
+            assertEquals(LearningRecoveryPresentation.Parent, recoveryPresentation(vm))
+            assertFalse(retryGate.isCompleted)
+            vm.openCourse(COURSE)
+            assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+            retryGate.complete(Unit)
+            runCurrent()
+            assertEquals(2, controller.revokeCalls)
+            assertFalse(vm.interruptedQuizCleanupPending.value)
+            assertFalse(vm.isRestoringNavigation.value)
+            assertEquals(listOf(LearningRoute.Dashboard), vm.backStack.toList())
+            assertEquals(CurriculumUiState.Hidden, vm.curriculumState.value)
+            assertTrue(repository.quizLaunchRequests.isEmpty())
+            assertTrue(repository.progressRequests.isEmpty())
+            vm.openCourse(COURSE)
+            runCurrent()
+            assertIs<CurriculumUiState.Content>(vm.curriculumState.value)
+            assertFalse(vm.recoveryDismissed.value)
+        }
+    }
+
+    @Test
+    fun recoveryPresentationKeepsUndismissedErrorsAndLetsDismissedCleanupRenderParent() {
+        assertEquals(LearningRecoveryPresentation.CleanupError,
+            learningRecoveryPresentation(false, true, null, false))
+        assertEquals(LearningRecoveryPresentation.RestorationError,
+            learningRecoveryPresentation(false, false, "Temporary failure", false))
+        assertEquals(LearningRecoveryPresentation.Parent,
+            learningRecoveryPresentation(true, true, null, true))
+    }
+
+    private fun recoveryPresentation(vm: CourseListViewModel) = learningRecoveryPresentation(
+        vm.isRestoringNavigation.value,
+        vm.interruptedQuizCleanupPending.value,
+        vm.restorationError.value,
+        vm.recoveryDismissed.value,
+    )
+
     private suspend fun signedInSession(): AcademySessionManager {
         val provider = MutableAccessTokenProvider()
         val api = FakeCourseApi(provider)
@@ -1071,6 +1501,8 @@ private class FakeCourseRepository(
     var coursesResult: ApiResult<List<Course>>,
     var dashboardResult: ApiResult<DashboardResponse>? = null,
     var dashboardGate: CompletableDeferred<Unit>? = null,
+    var coursesGate: CompletableDeferred<Unit>? = null,
+    var contentGate: CompletableDeferred<Unit>? = null,
     var contentResult: ApiResult<CourseContent> = ApiResult.Success(COURSE_CONTENT),
     var lessonResult: ApiResult<Lesson> = ApiResult.Success(LOADED_LESSON),
     var lessonGate: CompletableDeferred<Unit>? = null,
@@ -1091,6 +1523,7 @@ private class FakeCourseRepository(
 
     override suspend fun getCourses(): ApiResult<List<Course>> {
         courseCalls += 1
+        coursesGate?.await()
         return coursesResult
     }
 
@@ -1114,7 +1547,10 @@ private class FakeCourseRepository(
         }
     }
 
-    override suspend fun getCourseContent(courseId: Long): ApiResult<CourseContent> = contentResult
+    override suspend fun getCourseContent(courseId: Long): ApiResult<CourseContent> {
+        contentGate?.await()
+        return contentResult
+    }
 
     override suspend fun getLesson(courseId: Long, lessonId: Long): ApiResult<Lesson> {
         lessonRequests += courseId to lessonId
@@ -1163,13 +1599,18 @@ private class MemoryStorage(
 
 private class RecordingQuizWebSessionController(
     var result: QuizWebSessionCleanupResult = QuizWebSessionCleanupResult.Cleared,
+    var pendingCleanup: Boolean = false,
+    var gate: CompletableDeferred<Unit>? = null,
 ) : QuizWebSessionController {
+    override fun hasPendingCleanup(): Boolean = pendingCleanup
     var revokeCalls = 0
 
     override fun activate(logoutUrl: String) = Unit
 
     override suspend fun revokeAndClear(): QuizWebSessionCleanupResult {
+        gate?.await()
         revokeCalls += 1
+        if (result != QuizWebSessionCleanupResult.Failed) pendingCleanup = false
         return result
     }
 }

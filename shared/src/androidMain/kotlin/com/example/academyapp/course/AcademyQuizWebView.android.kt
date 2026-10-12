@@ -41,6 +41,8 @@ class AndroidQuizWebSessionController(
 
     internal fun profileNameForWebView(): String = QUIZ_WEB_PROFILE
 
+    override fun hasPendingCleanup(): Boolean = activeLogoutUrl != null
+
     override fun activate(logoutUrl: String) {
         val parsed = runCatching { Url(logoutUrl) }.getOrNull() ?: return
         if (logoutUrl == expectedLogoutUrl && parsed.host.isNotBlank()) {
